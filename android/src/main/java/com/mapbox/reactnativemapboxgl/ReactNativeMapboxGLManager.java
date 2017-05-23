@@ -470,6 +470,9 @@ public class ReactNativeMapboxGLManager extends ViewGroupManager<ReactNativeMapb
         }
 
         int addCount = itemsToAdd.size();
+
+        RNMGLAnnotationOptionsFactory.loadFromPersistentIconCache(view.getContext());
+
         for (int i = 0; i < addCount; i++) {
             ReadableMap annotation = itemsToAdd.getMap(i);
             RNMGLAnnotationOptions annotationOptions = RNMGLAnnotationOptionsFactory.annotationOptionsFromJS(annotation, view.getContext());

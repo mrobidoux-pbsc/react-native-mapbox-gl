@@ -1,6 +1,7 @@
 package com.mapbox.reactnativemapboxgl;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -8,6 +9,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.support.v4.content.ContextCompat;
 import android.os.AsyncTask;
+import android.util.Base64;
 import android.util.Log;
 
 import com.facebook.react.bridge.ReadableMap;
@@ -21,8 +23,10 @@ import com.mapbox.mapboxsdk.annotations.PolylineOptions;
 import com.mapbox.mapboxsdk.geometry.LatLng;
 import com.mapbox.mapboxsdk.maps.MapboxMap;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -69,6 +73,79 @@ class RNMGLPolygonOptions implements RNMGLAnnotationOptions {
 }
 
 public class RNMGLAnnotationOptionsFactory {
+    static Context viewContext;
+    static String TAG = "MAPBOXstuff";
+
+    static void loadFromPersistentIconCache(Context context) {
+        viewContext = context;
+
+        SharedPreferences sharedPreferences = getIconSharedPreferences();
+
+        if (sharedPreferences == null) {
+            return;
+        }
+        Log.i(TAG, "loadFrom");
+
+        Map<String, ?> cacheValues = sharedPreferences.getAll();
+
+        for (Map.Entry<String, ?> entry : cacheValues.entrySet()) {
+            String key = entry.getKey();
+            String base64String = (String) entry.getValue();
+
+            if (iconCache.containsKey(key)) {
+                continue;
+            }
+            Log.i(TAG, "decoding: " + key);
+
+            try {
+                Bitmap image = decodeBase64(base64String);
+                IconFactory iconFactory = IconFactory.getInstance(viewContext);
+                Icon icon = iconFactory.fromBitmap(image);
+                iconCache.put(key, icon);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            Log.i(TAG, "cache size: " + iconCache.size());
+        }
+    }
+
+    private static void addImageToPersistentIconCache(String key, Bitmap bitmap) {
+        SharedPreferences sharedPreferences = getIconSharedPreferences();
+
+        if (sharedPreferences == null) {
+            return;
+        }
+
+        Log.i(TAG, "addingImage: " + key);
+
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+
+        editor.putString(key, encodeToBase64(bitmap, Bitmap.CompressFormat.PNG, 100));
+        editor.apply();
+    }
+
+    private static SharedPreferences getIconSharedPreferences() {
+        if (viewContext == null) {
+            return null;
+        }
+
+        SharedPreferences sharedPreferences = viewContext.getSharedPreferences("CycleFinder:IconCache", Context.MODE_PRIVATE);
+
+        return sharedPreferences;
+    }
+
+    public static String encodeToBase64(Bitmap image, Bitmap.CompressFormat compressFormat, int quality)
+    {
+        ByteArrayOutputStream byteArrayOS = new ByteArrayOutputStream();
+        image.compress(compressFormat, quality, byteArrayOS);
+        return Base64.encodeToString(byteArrayOS.toByteArray(), Base64.DEFAULT);
+    }
+
+    public static Bitmap decodeBase64(String input)
+    {
+        byte[] decodedBytes = Base64.decode(input, 0);
+        return BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.length);
+    }
 
     public static RNMGLAnnotationOptions annotationOptionsFromJS(ReadableMap annotation, Context context) {
         String type = annotation.getString("type");
@@ -89,7 +166,7 @@ public class RNMGLAnnotationOptionsFactory {
         return ContextCompat.getDrawable(context, resID);
     }
 
-    static Drawable drawableFromUrl(Context context, String url) throws IOException {
+    static Drawable drawableFromUrl(Context context, String url, String cacheKey) throws IOException {
         try {
             URL urlConnection = new URL(url);
             Bitmap bitmap = new RetrieveDrawableFromUrl().execute(urlConnection).get();
@@ -97,6 +174,8 @@ public class RNMGLAnnotationOptionsFactory {
             if (bitmap == null) {
                 throw new IOException("Failed getting image");
             }
+
+            addImageToPersistentIconCache(cacheKey, bitmap);
 
             return new BitmapDrawable(context.getResources(), bitmap);
         } catch (MalformedURLException ex) {
@@ -130,7 +209,7 @@ public class RNMGLAnnotationOptionsFactory {
 
         Drawable drawable;
         try {
-            drawable = drawableFromUrl(context, path);
+            drawable = drawableFromUrl(context, path, cacheKey);
         } catch (MalformedURLException ex) {
             drawable = drawableFromDrawableName(context, path);
         }
